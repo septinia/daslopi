@@ -20,13 +20,19 @@ struct Args {
     )]
     url: String,
 
+    // #[arg(
+    //     long,
+    //     value_name = "KEYPAIR_PATH",
+    //     help = "Filepath to keypair to use",
+    // )]
+    // keypair: String,
     #[arg(
         long,
-        value_name = "KEYPAIR_PATH",
-        help = "Filepath to keypair to use",
+        value_name = "USERNAME",
+        global = true,
+        help = "Username used to connect to the server"
     )]
-    keypair: String,
-
+    username: Option<String>,
     #[command(subcommand)]
     command: Commands
 }
@@ -47,13 +53,14 @@ async fn main() {
     let args = Args::parse();
 
     let base_url = args.url;
-    let key = read_keypair_file(args.keypair.clone()).expect(&format!("Failed to load keypair from file: {}", args.keypair));
+    let username: String = args.username.unwrap_or("user".to_string());
+
     match args.command {
         Commands::Mine(args) => {
-            mine::mine(args, key, base_url).await;
+            mine::mine(args, base_url , username).await;
         },
         Commands::Signup => {
-            signup(base_url, key).await;
+            // signup(base_url, key).await;
         }
     }
 

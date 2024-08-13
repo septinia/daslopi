@@ -24,26 +24,16 @@ pub struct MineArgs {
     pub cores: u32,
 }
 
-pub async fn mine(args: MineArgs, key: Keypair, url: String) {
+pub async fn mine(args: MineArgs, url: String , username: String)  {
     loop {
         let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
-        let ts_msg = now.to_le_bytes();
-
-        let sig = key.sign_message(&ts_msg);
-
-        let mut ws_url_str = format!("ws://{}", url);
-        if ws_url_str.chars().last().unwrap() != '/' {
-            ws_url_str.push('/');
-        }
-
-        ws_url_str.push_str(&format!("?timestamp={}", now));
-        let url = url::Url::parse(&ws_url_str).expect("Failed to parse server url");
+        let url = url::Url::parse(&url).expect("Failed to parse server url");
         let host = url.host_str().expect("Invalid host in server url");
         let threads = args.cores;
 
 
-        let auth = BASE64_STANDARD.encode(format!("{}:{}", key.pubkey(), sig));
+        let auth = BASE64_STANDARD.encode(format!("{}", username));
 
         println!("Connecting to server...");
         let request = Request::builder()
@@ -77,14 +67,14 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String) {
                 let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
                 let msg = now.to_le_bytes();
-                let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
-                let mut bin_data: Vec<u8> = Vec::new();
-                bin_data.push(0u8);
-                bin_data.extend_from_slice(&key.pubkey().to_bytes());
-                bin_data.extend_from_slice(&msg);
-                bin_data.extend(sig);
+                // let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
+                // let mut bin_data: Vec<u8> = Vec::new();
+                // bin_data.push(0u8);
+                // bin_data.extend_from_slice(&key.pubkey().to_bytes());
+                // bin_data.extend_from_slice(&msg);
+                // bin_data.extend(sig);
 
-                let _ = sender.send(Message::Binary(bin_data)).await;
+                // let _ = sender.send(Message::Binary(bin_data)).await;
 
                 let sender = Arc::new(Mutex::new(sender));
 
@@ -120,7 +110,7 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String) {
 
                                             loop {
                                                 // Create hash
-                                                let hashes = drillx::get_hashes_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
+                                                let hashes = drillx::hash_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
 
                                                 for hx in hashes {
                                                     total_hashes += 1;
@@ -187,16 +177,16 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String) {
                             let mut hash_nonce_message = [0; 24];
                             hash_nonce_message[0..16].copy_from_slice(&best_hash_bin);
                             hash_nonce_message[16..24].copy_from_slice(&best_nonce_bin);
-                            let signature = key.sign_message(&hash_nonce_message).to_string().as_bytes().to_vec();
+                            // let signature = key.sign_message(&hash_nonce_message).to_string().as_bytes().to_vec();
 
                             let mut bin_data = [0; 57];
                             bin_data[00..1].copy_from_slice(&message_type.to_le_bytes());
                             bin_data[01..17].copy_from_slice(&best_hash_bin);
                             bin_data[17..25].copy_from_slice(&best_nonce_bin);
-                            bin_data[25..57].copy_from_slice(&key.pubkey().to_bytes());
+                            // bin_data[25..57].copy_from_slice(&key.pubkey().to_bytes());
 
                             let mut bin_vec = bin_data.to_vec();
-                            bin_vec.extend(signature);
+                            // bin_vec.extend(signature);
 
                             {
                                 let mut message_sender = message_sender.lock().await;
@@ -208,12 +198,12 @@ pub async fn mine(args: MineArgs, key: Keypair, url: String) {
                             let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
                             let msg = now.to_le_bytes();
-                            let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
+                            // let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
                             let mut bin_data: Vec<u8> = Vec::new();
                             bin_data.push(0u8);
-                            bin_data.extend_from_slice(&key.pubkey().to_bytes());
-                            bin_data.extend_from_slice(&msg);
-                            bin_data.extend(sig);
+                            // bin_data.extend_from_slice(&key.pubkey().to_bytes());
+                            // bin_data.extend_from_slice(&msg);
+                            // bin_data.extend(sig);
                             {
                                 let mut message_sender = message_sender.lock().await;
 
