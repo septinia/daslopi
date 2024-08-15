@@ -127,13 +127,9 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                                                     break;
                                                 }
 
-                                                if nonce % 100 == 0 {
-                                                    if hash_timer.elapsed().as_secs().ge(&cutoff) {
-                                                        if best_difficulty.ge(&8) {
-                                                            break;
-                                                        }
-                                                    }
-                                                } 
+                                                if hash_timer.elapsed().as_secs().ge(&cutoff) {
+                                                    break;
+                                                }
 
 
                                                 // Increment nonce
@@ -193,7 +189,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                                 let _ = message_sender.send(Message::Binary(bin_vec)).await;
                             }
 
-                            tokio::time::sleep(Duration::from_secs(3)).await;
+                            tokio::time::sleep(Duration::from_millis(500)).await;
                             // send new Ready message
                             let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
