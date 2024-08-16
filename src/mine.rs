@@ -134,6 +134,11 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
 
                                                 // Increment nonce
                                                 nonce += 1;
+
+                                                //should not happen
+                                                if hash_timer.elapsed().as_secs().ge(&70) {
+                                                    break;
+                                                }
                                             }
                                             
                                             // Return the best nonce
