@@ -7,7 +7,7 @@ use solana_sdk::{signature::{read_keypair_file, Keypair}, signer::Signer};
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
 use base64::prelude::*;
-
+use rayon::prelude::*;
 #[derive(Debug)]
 pub enum ServerMessage {
     StartMining([u8; 32], Range<u64>, u64)
@@ -89,19 +89,18 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                             let hash_timer = Instant::now();
                             let core_ids = core_affinity::get_core_ids().unwrap();
                             let nonces_per_thread = 10_000;
-                            let handles = core_ids
-                                .into_iter()
-                                .map(|i| {
-                                    std::thread::spawn({
+
+                            let rt: tokio::runtime::Handle = tokio::runtime::Handle::current();
+
+                            let handles: Vec<_> = (0..threads)
+                            .into_par_iter()
+                            .map(|i| {
+                                rt.spawn_blocking({
+                                    move || {
                                         let mut memory = equix::SolverMemory::new();
-                                        move || {
-                                            if (i.id as u32).ge(&threads) {
-                                                return None
-                                            } 
 
-                                            let _ = core_affinity::set_for_current(i);
 
-                                            let first_nonce = nonce_range.start + (nonces_per_thread * (i.id as u64));
+                                            let first_nonce: u64 = nonce_range.start + (nonces_per_thread * (i as u64));
                                             let mut nonce = first_nonce;
                                             let mut best_nonce = nonce;
                                             let mut best_difficulty = 0;
@@ -146,28 +145,31 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                                         }
                                     })
                                 })
-                                .collect::<Vec<_>>();
+                                .collect();
 
-                                // Join handles and return best nonce
-                                let mut best_nonce: u64 = 0;
-                                let mut best_difficulty = 0;
-                                let mut best_hash = drillx::Hash::default();
-                                let mut total_nonces_checked = 0;
-                                for h in handles {
-                                    if let Ok(Some((nonce, difficulty, hash, nonces_checked))) = h.join() {
-                                        total_nonces_checked += nonces_checked;
-                                        if difficulty > best_difficulty {
-                                            best_difficulty = difficulty;
-                                            best_nonce = nonce;
-                                            best_hash = hash;
+                                let mut total = 0;
+                                let joined = futures::future::join_all(handles).await;
+
+                                let (best_nonce, best_difficulty, best_hash , total_nonces_checked) = joined.into_iter().fold(
+                                    (0, 0, drillx::Hash::default(),0),
+                                    |(best_nonce, best_difficulty, best_hash ,total_nonces_checked ), h: Result<Option<(u64, u32, drillx::Hash, u64)>, tokio::task::JoinError>| {
+                                        if let Ok(Some((nonce, difficulty, hash, checked))) = h {
+                                            total += checked;
+                                            if difficulty > best_difficulty {
+                                                (nonce, difficulty, hash , checked)
+                                            } else {
+                                                (best_nonce, best_difficulty, best_hash , total_nonces_checked)
+                                            }
+                                        } else {
+                                            (0, 0, drillx::Hash::default(),0)
                                         }
-                                    }
-                                }
+                                    },
+                                );
 
                             let hash_time = hash_timer.elapsed();
 
                             println!("Found best diff: {}", best_difficulty);
-                            println!("Processed: {}", total_nonces_checked);
+                            println!("Processed: {}", total);
                             println!("Hash time: {:?}", hash_time);
 
 
