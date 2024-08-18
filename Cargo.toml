@@ -1,9 +1,10 @@
 [package]
 name = "ore-hq-client"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 
 [dependencies]
+hostname = "0.3"
 base64 = "0.22.1"
 bincode = "1.3.3"
 clap = { version = "4.5.13", features = ["derive"] }

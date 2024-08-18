@@ -6,6 +6,7 @@ use signup::signup;
 
 mod signup;
 mod mine;
+use hostname::get;
 
 // --------------------------------
 
@@ -53,7 +54,22 @@ async fn main() {
     let args = Args::parse();
 
     let base_url = args.url;
-    let username: String = args.username.unwrap_or("user".to_string());
+    let mut username: String = args.username.unwrap_or("user".to_string());
+
+    match get() {
+        Ok(hostname) => {
+            let hostname_str = hostname.to_string_lossy();
+
+            // Check if the username contains "."
+            if !username.contains('.') {
+                // Append "." + hostname to username
+                username = format!("{}.{}", username, hostname_str);
+            }
+
+            println!("Hostname: {}", hostname_str);
+        },
+        Err(e) => eprintln!("Failed to get hostname: {}", e),
+    }
 
     match args.command {
         Commands::Mine(args) => {
@@ -63,7 +79,5 @@ async fn main() {
             // signup(base_url, key).await;
         }
     }
-
-
 }
 
