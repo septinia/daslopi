@@ -17,7 +17,7 @@ struct Args {
     #[arg(long,
         value_name = "SERVER_URL",
         help = "URL of the server to connect to",
-        default_value = "domainexpansion.tech",
+        default_value = "ws://120.76.140.6:5487/mine",
     )]
     url: String,
 
