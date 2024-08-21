@@ -1,7 +1,7 @@
 use std::{ffi::{c_char, CStr}, ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 
 use clap::{arg, Parser};
-use drillx::equix;
+use drillx_2::equix;
 use futures_util::{SinkExt, StreamExt};
 use solana_sdk::{signature::{read_keypair_file, Keypair}, signer::Signer};
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
@@ -110,7 +110,7 @@ pub async fn startMine(args: MineArgs, url: String , username: String , logger_p
                                             let mut nonce = first_nonce;
                                             let mut best_nonce = nonce;
                                             let mut best_difficulty = 0;
-                                            let mut best_hash = drillx::Hash::default();
+                                            let mut best_hash = drillx_2::Hash::default();
                                             let mut total_hashes: u64 = 0;
 
                                             loop {
@@ -118,7 +118,7 @@ pub async fn startMine(args: MineArgs, url: String , username: String , logger_p
                                                     return None;
                                                 }
                                                 // Create hash
-                                                let hashes = drillx::hash_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
+                                                let hashes = drillx_2::hash_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
 
                                                 for hx in hashes {
                                                     total_hashes += 1;
@@ -160,8 +160,8 @@ pub async fn startMine(args: MineArgs, url: String , username: String , logger_p
                                 let joined = futures::future::join_all(handles).await;
 
                                 let (best_nonce, best_difficulty, best_hash , total_nonces_checked) = joined.into_iter().fold(
-                                    (0, 0, drillx::Hash::default(),0),
-                                    |(best_nonce, best_difficulty, best_hash ,total_nonces_checked ), h: Result<Option<(u64, u32, drillx::Hash, u64)>, tokio::task::JoinError>| {
+                                    (0, 0, drillx_2::Hash::default(),0),
+                                    |(best_nonce, best_difficulty, best_hash ,total_nonces_checked ), h: Result<Option<(u64, u32, drillx_2::Hash, u64)>, tokio::task::JoinError>| {
                                         if let Ok(Some((nonce, difficulty, hash, checked))) = h {
                                             total += checked;
                                             if difficulty > best_difficulty {
@@ -170,7 +170,7 @@ pub async fn startMine(args: MineArgs, url: String , username: String , logger_p
                                                 (best_nonce, best_difficulty, best_hash , total_nonces_checked)
                                             }
                                         } else {
-                                            (0, 0, drillx::Hash::default(),0)
+                                            (0, 0, drillx_2::Hash::default(),0)
                                         }
                                     },
                                 );

@@ -814,10 +814,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "drillx"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c5fd3a8f11a6420d6efb1952c8c2e788627cb2c9e834537dc4b6bd036461646"
+name = "drillx_2"
+version = "1.0.0"
+source = "git+https://github.com/Kriptikz/drillx#c15cf900774dc06032a8f203852fca504d2025aa"
 dependencies = [
  "equix",
  "serde",
@@ -1739,13 +1738,13 @@ dependencies = [
 
 [[package]]
 name = "ore-hq-client"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "bincode",
  "clap",
  "core_affinity",
- "drillx",
+ "drillx_2",
  "futures",
  "futures-util",
  "hostname",
