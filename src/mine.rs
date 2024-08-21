@@ -121,7 +121,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                                                     return None;
                                                 }
                                                 // Create hash
-                                                let hashes = drillx_2::hash_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
+                                                let hashes = drillx_2::get_hashes_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
 
                                                 for hx in hashes {
                                                     total_hashes += 1;
