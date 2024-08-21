@@ -1,4 +1,4 @@
-use std::{ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
+use std::{ffi::{c_char, CStr}, ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 
 use clap::{arg, Parser};
 use drillx::equix;
@@ -8,11 +8,16 @@ use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
 use base64::prelude::*;
 use rayon::prelude::*;
+
+use crate::logger;
+
+
 #[derive(Debug)]
 pub enum ServerMessage {
     StartMining([u8; 32], Range<u64>, u64)
 }
 
+#[derive(Clone)]
 #[derive(Debug, Parser)]
 pub struct MineArgs {
     #[arg(
@@ -24,15 +29,15 @@ pub struct MineArgs {
     pub cores: u32,
 }
 
-pub async fn mine(args: MineArgs, url: String , username: String)  {
-    loop {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
+pub async fn startMine(args: MineArgs, url: String , username: String , logger_ptr: *mut logger::Logger)  {
+    loop {
+        let logger = unsafe { &*logger_ptr };
         let url = url::Url::parse(&url).expect("Failed to parse server url");
         let host = url.host_str().expect("Invalid host in server url");
         let threads = args.cores;
 
-
+        
         let auth = BASE64_STANDARD.encode(format!("{}", username));
 
         println!("Connecting to server...");
@@ -51,7 +56,6 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
         match connect_async(request).await {
             Ok((ws_stream, _)) => {
                 println!("Connected to network!");
-
                 let (mut sender, mut receiver) = ws_stream.split();
                 let (message_sender, mut message_receiver) = tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
 
@@ -83,11 +87,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                 while let Some(msg) = message_receiver.recv().await {
                     match msg {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
-                            println!("Received start mining message!");
-                            println!("Mining starting...");
-                            println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
                             let hash_timer = Instant::now();
-                            let core_ids = core_affinity::get_core_ids().unwrap();
                             let nonces_per_thread = 10_000;
 
                             let rt: tokio::runtime::Handle = tokio::runtime::Handle::current();
@@ -167,12 +167,14 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                                 );
 
                             let hash_time = hash_timer.elapsed();
-
-                            println!("Found best diff: {}", best_difficulty);
-                            println!("Processed: {}", total);
-                            println!("Hash time: {:?}", hash_time);
-
-
+                            logger.clear_logs();
+                            logger.log(&format!(
+                                "Found best diff: {} Processed: {} Hash time: {:?}",
+                                best_difficulty,
+                                total,
+                                hash_time
+                            ));
+                            
                             let message_type =  2u8; // 1 u8 - BestSolution Message
                             let best_hash_bin = best_hash.d; // 16 u8
                             let best_nonce_bin = best_nonce.to_le_bytes(); // 8 u8

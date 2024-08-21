@@ -6,6 +6,7 @@ use signup::signup;
 
 mod signup;
 mod mine;
+mod logger;
 use hostname::get;
 
 // --------------------------------
@@ -71,13 +72,15 @@ async fn main() {
         Err(e) => eprintln!("Failed to get hostname: {}", e),
     }
 
-    match args.command {
-        Commands::Mine(args) => {
-            mine::mine(args, base_url , username).await;
-        },
-        Commands::Signup => {
-            // signup(base_url, key).await;
-        }
-    }
+    // match args.command {
+    //     let lgr = logger::Logger::new();
+
+    //     Commands::Mine(args) => {
+    //         mine::startMine(args, base_url , username ,lgr).await;
+    //     },
+    //     Commands::Signup => {
+    //         // signup(base_url, key).await;
+    //     }
+    // }
 }
 
