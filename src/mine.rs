@@ -8,6 +8,9 @@ use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
 use base64::prelude::*;
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::watch;
+
 #[derive(Debug)]
 pub enum ServerMessage {
     StartMining([u8; 32], Range<u64>, u64)
@@ -26,6 +29,8 @@ pub struct MineArgs {
 
 pub async fn mine(args: MineArgs, url: String , username: String)  {
     loop {
+        let (cancel_tx, mut cancel_rx) = watch::channel(false);
+        let is_cancelled = Arc::new(AtomicBool::new(false));
         let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
         let url = url::Url::parse(&url).expect("Failed to parse server url");
@@ -55,12 +60,15 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                 let (mut sender, mut receiver) = ws_stream.split();
                 let (message_sender, mut message_receiver) = tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
 
+                let is_cancelled_clone = Arc::clone(&is_cancelled);
                 let receiver_thread = tokio::spawn(async move {
                     while let Some(Ok(message)) = receiver.next().await {
                         if process_message(message, message_sender.clone()).is_break() {
                             break;
                         }
                     }
+                    let _ = cancel_tx.send(true);
+                    is_cancelled_clone.store(true, Ordering::SeqCst);
                 });
 
                 // send Ready message
@@ -87,15 +95,16 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                             println!("Mining starting...");
                             println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
                             let hash_timer = Instant::now();
-                            let core_ids = core_affinity::get_core_ids().unwrap();
                             let nonces_per_thread = 10_000;
 
+                            let is_cancelled_clone = Arc::clone(&is_cancelled);
                             let rt: tokio::runtime::Handle = tokio::runtime::Handle::current();
 
                             let handles: Vec<_> = (0..threads)
                             .into_par_iter()
                             .map(|i| {
                                 rt.spawn_blocking({
+                                    let is_cancelled = is_cancelled_clone.clone();
                                     move || {
                                         let mut memory = equix::SolverMemory::new();
 
@@ -108,6 +117,9 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                                             let mut total_hashes: u64 = 0;
 
                                             loop {
+                                                if is_cancelled.load(Ordering::SeqCst) {
+                                                    return None;
+                                                }
                                                 // Create hash
                                                 let hashes = drillx::hash_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
 
@@ -232,7 +244,6 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                     }
                 }
                 tokio::time::sleep(Duration::from_secs(3)).await;
-
             }
         }
     }
