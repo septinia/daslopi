@@ -1,15 +1,16 @@
-use std::{ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 
+use std::{ops::{ControlFlow, Range}, sync::Arc, time::{Duration, Instant, SystemTime, UNIX_EPOCH}};
 use clap::{arg, Parser};
-use drillx_2::equix;
+use drillx_2::equix::SolverMemory;
+use tor_c_equix;
 use futures_util::{SinkExt, StreamExt};
-use solana_sdk::{signature::{read_keypair_file, Keypair}, signer::Signer};
 use tokio::sync::{mpsc::UnboundedSender, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::{handshake::client::{generate_key, Request}, Message}};
 use base64::prelude::*;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::watch;
+use sha3::Digest;
 
 #[derive(Debug)]
 pub enum ServerMessage {
@@ -25,20 +26,73 @@ pub struct MineArgs {
         help = "Number of cores to use while mining"
     )]
     pub cores: u32,
+
+    #[arg(
+        long,
+        value_name = "Hash mode",
+        default_value = "1",
+        help = "Old=1 , New=2"
+    )]
+    pub mode: u32,
+}
+
+fn u16_to_u8_array(input: [u16; 8]) -> [u8; 16] {
+    let mut output = [0u8; 16];
+    unsafe {
+        for i in 0..8 {
+            *output.get_unchecked_mut(i * 2) = (input[i] & 0xFF) as u8;
+            *output.get_unchecked_mut(i * 2 + 1) = (input[i] >> 8) as u8;
+        }
+    }
+    output
+}
+
+fn hashv(digest: &[u8; 16], nonce: &[u8; 8]) -> [u8; 32] {
+    let mut hasher = sha3::Keccak256::new();
+    hasher.update(&sorted(*digest));
+    hasher.update(nonce);
+    hasher.finalize().into()
+}
+
+fn sorted(mut digest: [u8; 16]) -> [u8; 16] {
+    unsafe {
+        let u16_slice: &mut [u16; 8] = core::mem::transmute(&mut digest);
+        u16_slice.sort_unstable();
+        digest
+    }
+}
+
+pub fn c_equix(cell:&std::cell::RefCell<tor_c_equix::EquiX> ,challenge: [u8; 32],nonce:[u8; 8]) -> Vec<drillx_2::Hash> {
+    let mut hashes: Vec<drillx_2::Hash> = Vec::with_capacity(8);
+    let seed: [u8; 40] = drillx_2::seed(&challenge, &nonce);
+
+    let mut buffer: tor_c_equix::EquiXSolutionsBuffer = Default::default();
+    cell.borrow_mut().solve(&seed, &mut buffer);
+    for i in 0..buffer.count {
+        let sol = buffer.sols[i as usize];
+        let u8: [u8; 16] = u16_to_u8_array(sol.idx);
+        let dh = drillx_2::Hash {
+            d: u8,
+            h: hashv(&u8, &nonce),
+        };
+        hashes.push(dh);
+    }
+
+    hashes
 }
 
 pub async fn mine(args: MineArgs, url: String , username: String)  {
     loop {
         let (cancel_tx, mut cancel_rx) = watch::channel(false);
         let is_cancelled = Arc::new(AtomicBool::new(false));
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
         let url = url::Url::parse(&url).expect("Failed to parse server url");
         let host = url.host_str().expect("Invalid host in server url");
         let threads = args.cores;
+        let mode = args.mode;
 
-
-        let auth = BASE64_STANDARD.encode(format!("{}", username));
+        let version = env!("CARGO_PKG_VERSION");
+        let auth = BASE64_STANDARD.encode(format!("{}/{}", username,version));
 
         println!("Connecting to server...");
         let request = Request::builder()
@@ -72,18 +126,6 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                 });
 
                 // send Ready message
-                let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
-
-                let msg = now.to_le_bytes();
-                // let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
-                // let mut bin_data: Vec<u8> = Vec::new();
-                // bin_data.push(0u8);
-                // bin_data.extend_from_slice(&key.pubkey().to_bytes());
-                // bin_data.extend_from_slice(&msg);
-                // bin_data.extend(sig);
-
-                // let _ = sender.send(Message::Binary(bin_data)).await;
-
                 let sender = Arc::new(Mutex::new(sender));
 
                 // receive messages
@@ -106,8 +148,11 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                                 rt.spawn_blocking({
                                     let is_cancelled = is_cancelled_clone.clone();
                                     move || {
-                                        let mut memory = equix::SolverMemory::new();
-
+                                            let solve = tor_c_equix::EquiXFlags::EQUIX_CTX_SOLVE;
+                                            let comp = tor_c_equix::EquiXFlags::EQUIX_CTX_TRY_COMPILE;
+                                            let mem = tor_c_equix::EquiX::new(solve | comp);
+                                            let ctx_cell: std::cell::RefCell<tor_c_equix::EquiX> = std::cell::RefCell::new(mem);
+                                            let mut memory = SolverMemory::new();
 
                                             let first_nonce: u64 = nonce_range.start + (nonces_per_thread * (i as u64));
                                             let mut nonce = first_nonce;
@@ -121,9 +166,13 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                                                     return None;
                                                 }
                                                 // Create hash
-                                                let hashes = drillx_2::get_hashes_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
-
-                                                for hx in hashes {
+                                                let hashes : Vec<drillx_2::Hash>;
+                                                if mode == 1 {
+                                                    hashes = drillx_2::get_hashes_with_memory(&mut memory, &challenge, &nonce.to_le_bytes());
+                                                } else {
+                                                    hashes = c_equix(&ctx_cell ,challenge,nonce.to_le_bytes());
+                                                }
+                                                for hx in hashes {  
                                                     total_hashes += 1;
                                                     let difficulty = hx.difficulty();
                                                     if difficulty.gt(&best_difficulty) {
@@ -151,7 +200,6 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                                                     break;
                                                 }
                                             }
-                                            
                                             // Return the best nonce
                                             Some((best_nonce, best_difficulty, best_hash, total_hashes))
                                         }
@@ -192,16 +240,13 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                             let mut hash_nonce_message = [0; 24];
                             hash_nonce_message[0..16].copy_from_slice(&best_hash_bin);
                             hash_nonce_message[16..24].copy_from_slice(&best_nonce_bin);
-                            // let signature = key.sign_message(&hash_nonce_message).to_string().as_bytes().to_vec();
 
                             let mut bin_data = [0; 57];
                             bin_data[00..1].copy_from_slice(&message_type.to_le_bytes());
                             bin_data[01..17].copy_from_slice(&best_hash_bin);
                             bin_data[17..25].copy_from_slice(&best_nonce_bin);
-                            // bin_data[25..57].copy_from_slice(&key.pubkey().to_bytes());
 
-                            let mut bin_vec = bin_data.to_vec();
-                            // bin_vec.extend(signature);
+                            let bin_vec = bin_data.to_vec();
 
                             {
                                 let mut message_sender = message_sender.lock().await;
@@ -210,18 +255,11 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
 
                             tokio::time::sleep(Duration::from_millis(100)).await;
                             // send new Ready message
-                            let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs();
 
-                            let msg = now.to_le_bytes();
-                            // let sig = key.sign_message(&msg).to_string().as_bytes().to_vec();
                             let mut bin_data: Vec<u8> = Vec::new();
                             bin_data.push(0u8);
-                            // bin_data.extend_from_slice(&key.pubkey().to_bytes());
-                            // bin_data.extend_from_slice(&msg);
-                            // bin_data.extend(sig);
                             {
                                 let mut message_sender = message_sender.lock().await;
-
                                 let _ = message_sender.send(Message::Binary(bin_data)).await;
                             }
                         }
