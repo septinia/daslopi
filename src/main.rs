@@ -21,12 +21,6 @@ struct Args {
     )]
     url: String,
 
-    // #[arg(
-    //     long,
-    //     value_name = "KEYPAIR_PATH",
-    //     help = "Filepath to keypair to use",
-    // )]
-    // keypair: String,
     #[arg(
         long,
         value_name = "USERNAME",

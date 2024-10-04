@@ -34,6 +34,14 @@ pub struct MineArgs {
         help = "Old=1 , New=2"
     )]
     pub mode: u32,
+
+    #[arg(
+        long,
+        value_name = "Idle check",
+        default_value = "60",
+        help = "Set time in seconds for miner to auto-restart if the miner is idling for more than x seconds"
+    )]
+    pub idle: u32,
 }
 
 fn u16_to_u8_array(input: [u16; 8]) -> [u8; 16] {
@@ -85,11 +93,13 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
     loop {
         let (cancel_tx, mut cancel_rx) = watch::channel(false);
         let is_cancelled = Arc::new(AtomicBool::new(false));
+        let last_activity = Arc::new(Mutex::new(Instant::now()));
 
         let url = url::Url::parse(&url).expect("Failed to parse server url");
         let host = url.host_str().expect("Invalid host in server url");
         let threads = args.cores;
-        let mode = args.mode;
+        let mode: u32 = args.mode;
+        let idle_time: u32 = args.idle;
 
         let version = env!("CARGO_PKG_VERSION");
         let auth = BASE64_STANDARD.encode(format!("{}/{}", username,version));
@@ -111,10 +121,14 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
             Ok((ws_stream, _)) => {
                 println!("Connected to network!");
 
-                let (mut sender, mut receiver) = ws_stream.split();
+                let (sender, mut receiver) = ws_stream.split();
+                let sender = Arc::new(Mutex::new(sender));
                 let (message_sender, mut message_receiver) = tokio::sync::mpsc::unbounded_channel::<ServerMessage>();
 
                 let is_cancelled_clone = Arc::clone(&is_cancelled);
+                let last_activity_clone = Arc::clone(&last_activity);
+                *last_activity_clone.lock().await = Instant::now();
+
                 let receiver_thread = tokio::spawn(async move {
                     while let Some(Ok(message)) = receiver.next().await {
                         if process_message(message, message_sender.clone()).is_break() {
@@ -125,17 +139,34 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                     is_cancelled_clone.store(true, Ordering::SeqCst);
                 });
 
-                // send Ready message
-                let sender = Arc::new(Mutex::new(sender));
+                let idle_timeout_clone = Arc::clone(&last_activity);
+                let sender_clone = Arc::clone(&sender);
+                let is_cancelled_clone = Arc::clone(&is_cancelled);
+                let idle_check_thread = tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(10)); // Check every second
+                    let is_cancelled = is_cancelled_clone.clone();
+                    loop {
+                        interval.tick().await;
+                        let last_activity_time = *idle_timeout_clone.lock().await;
+                        if is_cancelled.load(Ordering::SeqCst) {
+                            break
+                        }
+                        if last_activity_time.elapsed().as_secs() >= (idle_time  as u64) {
+                            println!("Idle for too long, disconnecting and reconnecting...");
+                            let mut sender = sender_clone.lock().await;
+                            let _ = sender.send(Message::Close(None)).await;
+                            break;
+                        }
+                    }
+                });
 
                 // receive messages
-                let message_sender = sender.clone();
+                let message_sender = Arc::clone(&sender);
                 while let Some(msg) = message_receiver.recv().await {
                     match msg {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
-                            println!("Received start mining message!");
-                            println!("Mining starting...");
-                            println!("Nonce range: {} - {}", nonce_range.start, nonce_range.end);
+                            *last_activity_clone.lock().await = Instant::now();
+                            println!("Received start mining message , Nonce range: {} - {}", nonce_range.start, nonce_range.end);
                             let hash_timer = Instant::now();
                             let nonces_per_thread = 10_000;
 
@@ -228,10 +259,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
 
                             let hash_time = hash_timer.elapsed();
 
-                            println!("Found best diff: {}", best_difficulty);
-                            println!("Processed: {}", total);
-                            println!("Hash time: {:?}", hash_time);
-
+                            println!("Found best diff: {} , Processed:{} , Hash time:{:?} , Hashrate:{:.3} k", best_difficulty,total,hash_time , ((total as f32)/hash_time.as_secs_f32())/1000.0 );
 
                             let message_type =  2u8; // 1 u8 - BestSolution Message
                             let best_hash_bin = best_hash.d; // 16 u8
@@ -259,6 +287,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                             let mut bin_data: Vec<u8> = Vec::new();
                             bin_data.push(0u8);
                             {
+                                *last_activity_clone.lock().await = Instant::now();
                                 let mut message_sender = message_sender.lock().await;
                                 let _ = message_sender.send(Message::Binary(bin_data)).await;
                             }
@@ -267,6 +296,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                 }
 
                 let _ = receiver_thread.await;
+                // let _ = idle_check_thread.await;
             }, 
             Err(e) => {
                 match e {
