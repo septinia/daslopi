@@ -104,7 +104,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
         let version = env!("CARGO_PKG_VERSION");
         let auth = BASE64_STANDARD.encode(format!("{}/{}", username,version));
 
-        println!("Connecting to server...");
+        println!("pakailah..");
         let request = Request::builder()
             .method("GET")
             .uri(url.to_string())
@@ -119,7 +119,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
 
         match connect_async(request).await {
             Ok((ws_stream, _)) => {
-                println!("Connected to network!");
+                println!("gdfrer");
 
                 let (sender, mut receiver) = ws_stream.split();
                 let sender = Arc::new(Mutex::new(sender));
@@ -152,7 +152,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                             break
                         }
                         if last_activity_time.elapsed().as_secs() >= (idle_time  as u64) {
-                            println!("Idle for too long, disconnecting and reconnecting...");
+                            println!("jkkgukkk.");
                             let mut sender = sender_clone.lock().await;
                             let _ = sender.send(Message::Close(None)).await;
                             break;
@@ -166,7 +166,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
                     match msg {
                         ServerMessage::StartMining(challenge, nonce_range, cutoff) => {
                             *last_activity_clone.lock().await = Instant::now();
-                            println!("Received start mining message , Nonce range: {} - {}", nonce_range.start, nonce_range.end);
+                            println!("nsduiid , njjhkjyjd: {} - {}", nonce_range.start, nonce_range.end);
                             let hash_timer = Instant::now();
                             let nonces_per_thread = 10_000;
 
@@ -259,7 +259,7 @@ pub async fn mine(args: MineArgs, url: String , username: String)  {
 
                             let hash_time = hash_timer.elapsed();
 
-                            println!("Found best diff: {} , Processed:{} , Hash time:{:?} , Hashrate:{:.3} k", best_difficulty,total,hash_time , ((total as f32)/hash_time.as_secs_f32())/1000.0 );
+                            println!("jskliopo: {} , jnbbhvu:{} , vsghfkd:{:?} , vhsjysuy:{:.3} k", best_difficulty,total,hash_time , ((total as f32)/hash_time.as_secs_f32())/1000.0 );
 
                             let message_type =  2u8; // 1 u8 - BestSolution Message
                             let best_hash_bin = best_hash.d; // 16 u8
@@ -327,7 +327,7 @@ fn process_message(msg: Message, message_channel: UnboundedSender<ServerMessage>
             match message_type {
                     0 => {
                         if b.len() < 49 {
-                            println!("Invalid data for Message StartMining");
+                            println!("jjhkugh");
                         } else {
                             let mut hash_bytes = [0u8; 32];
                             // extract 256 bytes (32 u8's) from data for hash
